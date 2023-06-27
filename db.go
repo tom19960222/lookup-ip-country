@@ -2,12 +2,17 @@ package main
 
 import (
 	"encoding/csv"
-	"net"
+	"net/netip"
 	"os"
 )
 
-type IPRange struct {
-	IpRange     *net.IPNet
+type IPAndCountryMappingDatabase struct {
+	Ipv4 []*IPRangeData
+	Ipv6 []*IPRangeData
+}
+
+type IPRangeData struct {
+	IpRange     netip.Prefix
 	CountryCode string
 }
 
@@ -27,7 +32,7 @@ func readCountryData() []*rawCountryData {
 
 	for _, row := range rows {
 		countryDataList = append(countryDataList, &rawCountryData{
-			CountryCode: row[2],
+			CountryCode: row[4],
 			Id:          row[0],
 		})
 	}
@@ -44,29 +49,64 @@ func findCountryCode(countryId string, rawCountryDataList []*rawCountryData) str
 	return ""
 }
 
-func CreateNetworkDb() []*IPRange {
-	countryData := readCountryData()
+func buildIpv4Data(countryData *[]*rawCountryData) []*IPRangeData {
 	f, err := os.Open("GeoLite2-Country-Blocks-IPv4.csv")
 	panicIfError(err)
 	csvReader := csv.NewReader(f)
 	rows, err := csvReader.ReadAll()
 	panicIfError(err)
 
-	ipRangeList := make([]*IPRange, len(rows)-1) // 減掉標頭列
+	ipRangeList := make([]*IPRangeData, len(rows)-1) // 減掉標頭列
 	i := 0
 	for _, row := range rows {
-		_, ipRange, err := net.ParseCIDR(row[0])
-		if err != nil && err.Error() == "invalid CIDR address: network" {
+		ipRange, err := netip.ParsePrefix(row[0])
+		if err != nil && err.Error() == "netip.ParsePrefix(\"network\"): no '/'" {
 			continue
 		}
 		panicIfError(err)
 
-		ipRangeList[i] = &IPRange{
+		ipRangeList[i] = &IPRangeData{
 			IpRange:     ipRange,
-			CountryCode: findCountryCode(row[1], countryData),
+			CountryCode: findCountryCode(row[1], *countryData),
 		}
 		i++
 	}
 
 	return ipRangeList
+}
+
+func buildIpv6Data(countryData *[]*rawCountryData) []*IPRangeData {
+	f, err := os.Open("GeoLite2-Country-Blocks-IPv6.csv")
+	panicIfError(err)
+	csvReader := csv.NewReader(f)
+	rows, err := csvReader.ReadAll()
+	panicIfError(err)
+
+	ipRangeList := make([]*IPRangeData, len(rows)-1) // 減掉標頭列
+	i := 0
+	for _, row := range rows {
+		ipRange, err := netip.ParsePrefix(row[0])
+		if err != nil && err.Error() == "netip.ParsePrefix(\"network\"): no '/'" {
+			continue
+		}
+		panicIfError(err)
+
+		ipRangeList[i] = &IPRangeData{
+			IpRange:     ipRange,
+			CountryCode: findCountryCode(row[1], *countryData),
+		}
+		i++
+	}
+
+	return ipRangeList
+}
+
+func BuildDatabase() *IPAndCountryMappingDatabase {
+	countryData := readCountryData()
+	Ipv4 := buildIpv4Data(&countryData)
+	Ipv6 := buildIpv6Data(&countryData)
+	return &IPAndCountryMappingDatabase{
+		Ipv4,
+		Ipv6,
+	}
 }
